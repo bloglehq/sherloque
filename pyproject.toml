@@ -5,9 +5,9 @@ description = "Sherloque is a minimal search engine with crawling, querying, and
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiosqlite>=0.21.0",
     "bs4>=0.0.2",
     "nltk>=3.9.1",
+    "psycopg[binary]>=3.2.10",
     "pydantic>=2.11.9",
     "python-dotenv>=1.1.1",
 ]

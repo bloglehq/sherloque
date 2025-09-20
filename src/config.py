@@ -3,13 +3,16 @@ from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Callable
 
-import aiosqlite
+import psycopg
 from dotenv import load_dotenv
 from pydantic.v1 import BaseSettings
 
 
 class DefaultSettings(BaseSettings):
-    DB_NAME: str = os.getenv("DB_NAME", "unknown")
+    DB_URL: str = os.getenv(
+        "DB_URL",
+        "postgresql://postgres:postgres@localhost:5432/sherloque",
+    )
 
 
 class Settings(DefaultSettings):
@@ -30,20 +33,17 @@ def manage_db_cursor(commit: bool = False):
 
         @wraps(func)
         async def create_cursor(*args, **kwargs):
-            async with aiosqlite.connect(get_settings().DB_NAME) as conn:
-                cursor = await conn.cursor()
-                # call the original function with the cursor and commit if asked
-                print("name: ", func.__name__)
-                print("self: ", func.__qualname__)
-                if is_class_func:
-                    # inject cursor after `self`
-                    self_instance, other_args = args[0], args[1:]
-                    result = await func(self_instance, cursor, *other_args, **kwargs)
-                else:
-                    result = await func(cursor, *args, **kwargs)
-                if not commit:
-                    return result
-                await conn.commit()
+            async with await psycopg.AsyncConnection.connect(get_settings().DB_URL) as conn:
+                async with conn.cursor() as cursor:
+                    # call the original function with the cursor and commit if asked
+                    if is_class_func:
+                        # inject cursor after `self`
+                        self_instance, other_args = args[0], args[1:]
+                        result = await func(self_instance, cursor, *other_args, **kwargs)
+                    else:
+                        result = await func(cursor, *args, **kwargs)
+                    if commit:
+                        await conn.commit()
             return result
         return create_cursor
     return decorator
