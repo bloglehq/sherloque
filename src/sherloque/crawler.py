@@ -1,15 +1,20 @@
+import logging
 from urllib import request
 
-import psycopg
-from psycopg import sql
 import nltk
+import psycopg
 from bs4 import BeautifulSoup
-from nltk import word_tokenize, PorterStemmer, WordNetLemmatizer
+from nltk import word_tokenize, WordNetLemmatizer
+from psycopg import sql
 
-from ..config import get_settings, manage_db_cursor
-from ..utils import create_index_tables, ALLOWED_TABLE_FIELDS
+import log_config as log_config
+from config import get_settings, manage_db_cursor
+from utils import create_index_tables, ALLOWED_TABLE_FIELDS
 
+log_config.setup()
 settings = get_settings()
+
+LOG = logging.getLogger(__name__)
 
 
 class LIEnggBlogCrawler:
@@ -57,13 +62,11 @@ class LIEnggBlogCrawler:
     @manage_db_cursor()
     async def add_to_index(self, cursor: psycopg.AsyncCursor, url: str, soup: BeautifulSoup):
         """Index an individual page"""
-        if await self.is_indexed(url):
-            return
-        print("Indexing ", url)
-
+        LOG.info(f"Indexing URL: {url}")
         text = await self.get_text_only(soup)
         processed_toks = await self.preprocess_text(text)
         url_id = await self._get_entry_id("url_list", "url", url)
+
         for i in range(len(processed_toks)):
             token = processed_toks[i]
             # handle this better using nltk
@@ -73,6 +76,7 @@ class LIEnggBlogCrawler:
                 "INSERT INTO token_location(url_id, token_id, location) VALUES (%s, %s, %s)",
                 (url_id, token_id, i)
             )
+        LOG.info(f"Finished indexing URL: {url}")
 
     async def get_text_only(self, soup: BeautifulSoup) -> str:
         """Extract the text from an HTML page (no tags)"""
@@ -133,17 +137,23 @@ class LIEnggBlogCrawler:
         """Starting with a list of pages, do a breadth first search to the given depth, indexing pages as we go"""
         for i in range(depth):
             new_pages = set()
+            LOG.info(f"Starting {i} level of crawling with {len(new_pages) if new_pages else len(pages)} new pages")
             for page in pages:
+                LOG.info(f"Starting crawling for page: {page}")
+                if await self.is_indexed(page):
+                    LOG.info(f"URL {page} already indexed. Skipping ...")
+                    continue
                 try:
                     c = request.urlopen(page)
                 except Exception as e:
-                    print("Could not open page: ", page)
-                    print("Error: ", str(e))
+                    LOG.error(f"Could not open page: {str(e)}")
                     continue
+                LOG.debug(f"Retrieved page: {page}")
 
                 soup = BeautifulSoup(c.read(), "html.parser")
                 await self.add_to_index(page, soup)
                 links = await self._get_related_articles_soups(soup)
+                LOG.info(f"Retrieved {len(links)} related articles for page: {page}")
                 for link in links:
                     url = link.attrs["href"]
                     new_pages.add(url)
@@ -151,7 +161,7 @@ class LIEnggBlogCrawler:
                     await self.add_link_ref(page, url, link_text)
 
                 await cursor.connection.commit()
-                # commit handled by decorator when commit=True
+                LOG.info(f"Finished crawling page: {page}")
             pages = list(new_pages)
 
 

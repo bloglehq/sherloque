@@ -1,5 +1,5 @@
 import psycopg
-from .config import manage_db_cursor
+from config import manage_db_cursor
 
 @manage_db_cursor(commit=True)
 async def create_index_tables(cursor: psycopg.AsyncCursor):
