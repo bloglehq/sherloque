@@ -9,7 +9,7 @@ from psycopg import sql
 
 import log_config as log_config
 from config import get_settings, manage_db_cursor
-from utils import create_index_tables, ALLOWED_TABLE_FIELDS
+from utils import create_index_tables, ALLOWED_TABLE_FIELDS, preprocess_text
 
 log_config.setup()
 settings = get_settings()
@@ -64,7 +64,7 @@ class LIEnggBlogCrawler:
         """Index an individual page"""
         LOG.info(f"Indexing URL: {url}")
         text = await self.get_text_only(soup)
-        processed_toks = await self.preprocess_text(text)
+        processed_toks = await preprocess_text(text)
         url_id = await self._get_entry_id("url_list", "url", url)
 
         for i in range(len(processed_toks)):
@@ -81,12 +81,6 @@ class LIEnggBlogCrawler:
     async def get_text_only(self, soup: BeautifulSoup) -> str:
         """Extract the text from an HTML page (no tags)"""
         return soup.get_text().replace("\n\n", '')
-
-    async def preprocess_text(self, text: str) -> list[str]:
-        """Tokenize and stem the text using NLTK"""
-        toks = word_tokenize(text)
-        lemmatizer = WordNetLemmatizer()
-        return [lemmatizer.lemmatize(tok) for tok in toks]
 
     @manage_db_cursor()
     async def is_indexed(self, cursor: psycopg.AsyncCursor, url: str) -> bool:
