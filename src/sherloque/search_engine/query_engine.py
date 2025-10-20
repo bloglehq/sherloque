@@ -23,7 +23,7 @@ class QueryEngine:
     async def get_matched_urls(self, cursor: psycopg.AsyncCursor, query: str) -> URLMatchDetailModel:
         tokens = await preprocess_text(query)
         if not tokens:
-            return []
+            return URLMatchDetailModel(url_matches=[], token_ids=[])
         cur = await cursor.execute(
             sql.SQL("SELECT _id FROM token_list WHERE token IN ({})").format(
                 sql.SQL(", ").join([sql.Literal(token) for token in tokens])
