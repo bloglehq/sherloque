@@ -4,12 +4,11 @@ from urllib import request
 import nltk
 import psycopg
 from bs4 import BeautifulSoup
-from nltk import word_tokenize, WordNetLemmatizer
 from psycopg import sql
 
 import log_config as log_config
 from config import get_settings, manage_db_cursor
-from utils import create_index_tables, ALLOWED_TABLE_FIELDS, preprocess_text
+from sherloque.utils import ALLOWED_TABLE_FIELDS, preprocess_text
 
 log_config.setup()
 settings = get_settings()
@@ -27,7 +26,6 @@ class LIEnggBlogCrawler:
 
     @classmethod
     async def create(cls):
-        await create_index_tables()
         return cls()
 
     @manage_db_cursor()

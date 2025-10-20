@@ -1,11 +1,13 @@
 from fastapi import APIRouter
 
-from sherloque.search_engine import QueryEngine
+from sherloque.search_engine import QueryEngine, Ranker, ScoreSuite
 from app.models import QueryResponse
 
 router = APIRouter(prefix="/query")
 
-q = QueryEngine()
+s = ScoreSuite()
+r = Ranker(score_suite=s)
+q = QueryEngine(ranker=r)
 
 @router.get("", response_model=QueryResponse)
 async def query_index(query: str) -> QueryResponse:

@@ -2,6 +2,7 @@ import os
 from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Callable
+import inspect
 
 import psycopg
 from dotenv import load_dotenv
@@ -26,20 +27,42 @@ def get_settings() -> Settings:
     return Settings()
 
 
+# def manage_db_cursor(commit: bool = False):
+#     # decorator factory
+#     def decorator(func: Callable):
+#         is_class_func: bool = len(func.__qualname__.split('.')) > 1
+#
+#         @wraps(func)
+#         async def create_cursor(*args, **kwargs):
+#             async with await psycopg.AsyncConnection.connect(get_settings().DB_URL) as conn:
+#                 async with conn.cursor() as cursor:
+#                     # call the original function with the cursor and commit if asked
+#                     if is_class_func:
+#                         # inject cursor after `self`
+#                         self_instance, other_args = args[0], args[1:]
+#                         result = await func(self_instance, cursor, *other_args, **kwargs)
+#                     else:
+#                         result = await func(cursor, *args, **kwargs)
+#                     if commit:
+#                         await conn.commit()
+#             return result
+#         return create_cursor
+#     return decorator
+
 def manage_db_cursor(commit: bool = False):
     # decorator factory
     def decorator(func: Callable):
-        is_class_func: bool = len(func.__qualname__.split('.')) > 1
+        params = list(inspect.signature(func).parameters.values())
+        first_param_name = params[0].name if params else None
+        expects_bound_first = first_param_name in {"self", "cls"}
 
         @wraps(func)
         async def create_cursor(*args, **kwargs):
             async with await psycopg.AsyncConnection.connect(get_settings().DB_URL) as conn:
                 async with conn.cursor() as cursor:
-                    # call the original function with the cursor and commit if asked
-                    if is_class_func:
-                        # inject cursor after `self`
-                        self_instance, other_args = args[0], args[1:]
-                        result = await func(self_instance, cursor, *other_args, **kwargs)
+                    if expects_bound_first and args:
+                        bound_first_arg, remaining_args = args[0], args[1:]
+                        result = await func(bound_first_arg, cursor, *remaining_args, **kwargs)
                     else:
                         result = await func(cursor, *args, **kwargs)
                     if commit:
