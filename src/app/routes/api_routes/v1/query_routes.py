@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
-from sherloque.search_engine import QueryEngine, Ranker, ScoreSuite
+from sherloque.search_engine import QueryEngine
+from sherloque.search_engine.ranker import Ranker, ScoreSuite
 from app.models import QueryResponse
 
 router = APIRouter(prefix="/query")
