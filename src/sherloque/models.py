@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class URLMatch(BaseModel):
     url: str
     url_id: int
+    num_matched_tokens: int
 
 
 class URLMatchDetailModel(BaseModel):

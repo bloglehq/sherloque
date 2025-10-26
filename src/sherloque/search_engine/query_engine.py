@@ -34,13 +34,13 @@ class QueryEngine:
             LOG.debug("No tokens were found in the database matching the query.")
             return URLMatchDetailModel(url_matches=[], token_ids=[])
 
-        uid_cur = await cursor.execute(
+        cur = await cursor.execute(
             sql.SQL("""
-                    SELECT url_id
+                    SELECT url_id, COUNT(DISTINCT token_id)
                     FROM token_location
                     WHERE token_id IN ({token_ids})
                     GROUP BY url_id
-                    HAVING COUNT(DISTINCT token_id) = {num_tokens}
+                    -- HAVING COUNT(DISTINCT token_id) = {num_tokens}
                     """).format(
                 token_ids=sql.SQL(", ").join(
                     [sql.Literal(token_id) for token_id in token_ids]
@@ -48,8 +48,8 @@ class QueryEngine:
                 num_tokens=sql.Literal(len(token_ids)),
             ),
         )
-        url_ids = [record[0] async for record in uid_cur]
-        if not url_ids:
+        urls_tok_counts = [record async for record in cur]
+        if not urls_tok_counts:
             LOG.debug("No URLs were found in the database matching the query.")
             return URLMatchDetailModel(url_matches=[], token_ids=[])
         url_cur = await cursor.execute(
@@ -58,21 +58,28 @@ class QueryEngine:
                     FROM url_list
                     WHERE _id IN ({url_ids})
                     """).format(
-                url_ids=sql.SQL(", ").join([sql.Literal(url_id) for url_id in url_ids]),
+                url_ids=sql.SQL(", ").join([sql.Literal(url_id) for url_id, _ in urls_tok_counts]),
             ),
         )
         urls = [record[0] async for record in url_cur]
         return (
-            URLMatchDetailModel(url_matches=[URLMatch(url=url, url_id=url_id) for url, url_id in zip(urls, url_ids)], token_ids=token_ids)
+            URLMatchDetailModel(
+                url_matches=[
+                    URLMatch(
+                        url=url, url_id=url_id, num_matched_tokens=num_matched_tokens
+                    ) for url, (url_id, num_matched_tokens) in zip(urls, urls_tok_counts)
+                ],
+                token_ids=token_ids
+            )
             if urls
             else URLMatchDetailModel(url_matches=[], token_ids=token_ids)
         )
 
     async def query(self, query: str) -> list[Score]:
         matches: URLMatchDetailModel = await self.get_matched_urls(query=query)
-        if not matches:
+        if not matches.url_matches:
             return []
-        ranked_urls = await self.ranker.rank(query=query, url_matches=matches)
+        ranked_urls = await self.ranker.rank(url_matches=matches)
         return ranked_urls
 
 
