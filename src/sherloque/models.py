@@ -27,6 +27,7 @@ class ScoreDetailModel(BaseModel):
 
 __all__ = [
     "URLMatch",
+    "URLMatchDetailModel",
     "Score",
     "ScoreDetailModel",
 ]
