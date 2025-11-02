@@ -1,9 +1,8 @@
 from collections import defaultdict
 
-import psycopg
-from psycopg import sql
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio.engine import AsyncConnection, AsyncEngine
 
-from config import manage_db_cursor
 from sherloque.models import Score, URLMatchDetailModel
 
 
@@ -19,26 +18,26 @@ class ScoreSuite:
             return [Score(score=(score.score + eps) / (max_score.score + eps), url=score.url) for score in scores]
 
     @classmethod
-    @manage_db_cursor()
     async def score_word_frequency(
             cls,
-            cursor: psycopg.AsyncCursor,
-            url_matches: URLMatchDetailModel
+            url_matches: URLMatchDetailModel,
+            conn: AsyncConnection,
     ) -> list[Score]:
         token_ids = url_matches.token_ids
-        cur = await cursor.execute(
-            sql.SQL("""
-                    SELECT tl.url_id, COUNT(tl.token_id)
-                    FROM token_location tl
-                    WHERE tl.token_id in ({token_ids})
-                      AND tl.url_id IN ({url_ids})
-                    GROUP BY tl.url_id
-                    """).format(
-                token_ids=sql.SQL(", ").join([sql.Literal(token_id) for token_id in token_ids]),
-                url_ids=sql.SQL(", ").join([sql.Literal(url_match.url_id) for url_match in url_matches.url_matches]),
-            )
+        cur = await conn.execute(
+            text("""
+                 SELECT tl.url_id, COUNT(tl.token_id)
+                 FROM token_location tl
+                 WHERE tl.token_id = ANY(:token_ids)
+                   AND tl.url_id = ANY(:url_ids)
+                 GROUP BY tl.url_id
+                 """),
+            {
+                "token_ids": token_ids,
+                "url_ids": [url_match.url_id for url_match in url_matches.url_matches],
+            }
         )
-        rows = [record async for record in cur]
+        rows = [record for record in cur]
         if not rows:
             return []
 
@@ -48,25 +47,25 @@ class ScoreSuite:
         return normalized_scores
 
     @classmethod
-    @manage_db_cursor()
     async def score_token_location_start_bias(
             cls,
-            cursor: psycopg.AsyncCursor,
-            url_matches: URLMatchDetailModel
+            url_matches: URLMatchDetailModel,
+            conn: AsyncConnection,
     ) -> list[Score]:
-        cur = await cursor.execute(
-            sql.SQL("""
-                    SELECT tl.url_id, tl.token_id, MIN(tl.location)
-                    FROM token_location tl
-                    WHERE token_id IN ({token_ids})
-                      AND url_id in ({url_ids})
-                    GROUP BY tl.url_id, tl.token_id
-                    """).format(
-                token_ids=sql.SQL(", ").join(sql.Literal(token_id) for token_id in url_matches.token_ids),
-                url_ids=sql.SQL(", ").join(sql.Literal(url_match.url_id) for url_match in url_matches.url_matches),
-            )
+        cur = await conn.execute(
+            text("""
+                 SELECT tl.url_id, tl.token_id, MIN(tl.location)
+                 FROM token_location tl
+                 WHERE token_id = ANY(:token_ids)
+                   AND url_id = ANY(:url_ids)
+                 GROUP BY tl.url_id, tl.token_id
+                 """),
+            {
+                "token_ids": url_matches.token_ids,
+                "url_ids": [url_match.url_id for url_match in url_matches.url_matches],
+            }
         )
-        rows = [record async for record in cur]
+        rows = [record for record in cur]
         if not rows:
             return []
 
@@ -81,25 +80,29 @@ class ScoreSuite:
 
     async def run_scoring(
             self,
+            conn: AsyncConnection,
             url_matches: URLMatchDetailModel
     ) -> list[Score]:
         score_results = [
-            (1.0, await self.score_word_frequency(url_matches)),
-            (1.0, await self.score_token_location_start_bias(url_matches)),
+            (1.0, await self.score_word_frequency(url_matches=url_matches, conn=conn)),
+            (1.5, await self.score_token_location_start_bias(url_matches=url_matches, conn=conn)),
         ]
         weighted_scores = defaultdict(float)
         for weight, scores in score_results:
             for score in scores:
                 weighted_scores[score.url] += weight * score.score
-        return [Score(score=score / len(score_results), url=url) for url, score in weighted_scores.items()]
+        return [Score(score=score / sum([w for w, _ in score_results]), url=url) for url, score in
+                weighted_scores.items()]
 
 
 class Ranker:
-    def __init__(self, score_suite: ScoreSuite):
+    def __init__(self, score_suite: ScoreSuite, engine: AsyncEngine):
         self.score_suite = score_suite
+        self.engine = engine
 
     async def rank(self, url_matches: URLMatchDetailModel):
-        scores = await self.score_suite.run_scoring(url_matches)
+        async with self.engine.connect() as conn:
+            scores = await self.score_suite.run_scoring(conn=conn, url_matches=url_matches)
         ranked_urls = sorted(scores, key=lambda x: x.score, reverse=True)
         return ranked_urls
 
