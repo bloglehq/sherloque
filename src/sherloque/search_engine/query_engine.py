@@ -13,8 +13,6 @@ log_config.setup()
 
 LOG = logging.getLogger(__name__)
 
-engine = get_async_engine()
-
 
 class QueryEngine:
     def __init__(self, ranker: Ranker, engine: AsyncEngine):
