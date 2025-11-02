@@ -5,12 +5,16 @@ description = "Sherloque is a minimal search engine with crawling, querying, and
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg>=0.30.0",
     "bs4>=0.0.2",
     "fastapi[standard]>=0.117.1",
+    "greenlet>=3.2.4",
     "nltk>=3.9.1",
     "psycopg[binary]>=3.2.10",
     "pydantic>=2.11.9",
+    "pydantic-settings>=2.11.0",
     "python-dotenv>=1.1.1",
+    "sqlalchemy>=2.0.44",
 ]
 
 [tools.setuptools]
