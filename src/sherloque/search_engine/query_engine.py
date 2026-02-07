@@ -3,9 +3,8 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
-from app.config import get_async_engine
 from sherloque import log_config
-from sherloque.models import URLMatch, Score, URLMatchDetailModel
+from sherloque.models import Score, URLMatch, URLMatchDetailModel
 from sherloque.search_engine.ranker import Ranker
 from sherloque.utils import preprocess_text
 
@@ -66,9 +65,10 @@ class QueryEngine:
                 url_matches=[
                     URLMatch(
                         url=url, url_id=url_id, num_matched_tokens=num_matched_tokens
-                    ) for url, (url_id, num_matched_tokens) in zip(urls, urls_tok_counts)
+                    )
+                    for url, (url_id, num_matched_tokens) in zip(urls, urls_tok_counts)
                 ],
-                token_ids=token_ids
+                token_ids=token_ids,
             )
             if urls
             else URLMatchDetailModel(url_matches=[], token_ids=token_ids)
