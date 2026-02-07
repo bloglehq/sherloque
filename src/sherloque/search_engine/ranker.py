@@ -84,8 +84,8 @@ class ScoreSuite:
             url_matches: URLMatchDetailModel
     ) -> list[Score]:
         score_results = [
-            (1.0, await self.score_word_frequency(url_matches=url_matches, conn=conn)),
-            (1.5, await self.score_token_location_start_bias(url_matches=url_matches, conn=conn)),
+            (1.5, await self.score_word_frequency(url_matches=url_matches, conn=conn)),
+            (1.0, await self.score_token_location_start_bias(url_matches=url_matches, conn=conn)),
         ]
         weighted_scores = defaultdict(float)
         for weight, scores in score_results:
