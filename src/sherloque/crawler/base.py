@@ -14,9 +14,6 @@ class CrawlerBase:
     def __init__(self, engine: AsyncEngine):
         self.engine = engine
 
-    def __repr__(self):
-        return "Crawler base."
-
     async def preprocess(self, text: str) -> list[str]:
         return await preprocess_text(text)
 
