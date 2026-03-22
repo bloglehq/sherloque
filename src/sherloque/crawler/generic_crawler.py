@@ -20,7 +20,7 @@ class GenericCrawler(CrawlerBase):
 
         super().__init__(engine=engine)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "Generic crawler."
 
     async def get_text_only(self, soup: BeautifulSoup) -> str:
