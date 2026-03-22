@@ -6,11 +6,11 @@ from nltk import word_tokenize, WordNetLemmatizer
 from sqlalchemy.ext.asyncio.engine import AsyncEngine
 
 ALLOWED_TABLE_FIELDS = {
-    "url_list": ["url"],
-    "token_list": ["token"],
-    "token_location": ["url_id", "token_id", "location"],
-    "link": ["from_id", "to_id"],
-    "link_tokens": ["token_id", "link_id"],
+    "document": ["url", "title"],
+    "token": ["token"],
+    "token_position": ["doc_id", "token_id", "position"],
+    "term_doc_stats": ["token_id", "doc_id", "tf"],
+    "link": ["from_doc_id", "to_doc_id"],
 }
 
 

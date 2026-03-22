@@ -1,5 +1,7 @@
 import logging
 from abc import abstractmethod
+from collections import Counter
+from typing import Optional
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -17,10 +19,18 @@ class CrawlerBase:
     async def preprocess(self, text: str) -> list[str]:
         return await preprocess_text(text)
 
-    async def _get_entry_id(self, conn: AsyncConnection, table: str, field: str, value: str) -> int:
+    async def _get_entry_id(
+        self,
+        conn: AsyncConnection,
+        table: str,
+        field: str,
+        value: str,
+    ) -> int:
         """Helper function for getting an entry id and adding it if it's not present"""
-        if table not in ALLOWED_TABLE_FIELDS or \
-                field not in ALLOWED_TABLE_FIELDS[table]:
+        if (
+            table not in ALLOWED_TABLE_FIELDS
+            or field not in ALLOWED_TABLE_FIELDS[table]
+        ):
             raise ValueError("Invalid table or field name provided")
 
         cur = await conn.execute(
@@ -44,37 +54,76 @@ class CrawlerBase:
         """Index an individual page"""
         LOG.info(f"Indexing URL: {url}")
         processed_toks = await self.preprocess(text)
-        url_id = await self._get_entry_id(conn, "url_list", "url", url)
+        doc_len = len(processed_toks)
+        cur = await conn.execute(
+            sa.text("""
+                    INSERT INTO document (full_text, url, len)
+                    VALUES (:full_text, :url, :len)
+                    RETURNING _id
+                    """),
+            {"full_text": text, "url": url, "len": doc_len},
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError(f"Failed to insert document for URL: {url}")
+        doc_id = row[0]
 
         for i, token in enumerate(processed_toks):
-            token_id = await self._get_entry_id(conn, "token_list", "token", token)
+            token_id = await self._get_entry_id(conn, "token", "token", token)
             await conn.execute(
                 sa.text("""
-                        INSERT INTO token_location(url_id, token_id, location)
-                        VALUES (:url_id, :token_id, :location)
+                        INSERT INTO token_position(doc_id, token_id, position)
+                        VALUES (:doc_id, :token_id, :position)
                         """),
-                {"url_id": url_id, "token_id": token_id, "location": i}
+                {"doc_id": doc_id, "token_id": token_id, "position": i},
+            )
+
+        for token, tf in Counter(processed_toks).items():
+            token_id = await self._get_entry_id(conn, "token", "token", token)
+            await conn.execute(
+                sa.text("""
+                        INSERT INTO term_doc_stats(token_id, doc_id, tf)
+                        VALUES (:token_id, :doc_id, :tf)
+                        """),
+                {"token_id": token_id, "doc_id": doc_id, "tf": tf},
+            )
+            await conn.execute(
+                sa.text("""
+                        UPDATE token
+                        SET doc_freq = doc_freq + 1
+                        WHERE _id = :token_id
+                        """),
+                {"token_id": token_id},
             )
         LOG.info(f"Finished indexing URL: {url}")
 
-    async def is_indexed(self, conn: AsyncConnection, url: str) -> bool:
+    async def is_indexed(
+        self,
+        conn: AsyncConnection,
+        url: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> bool:
         """Return True if this URL is already indexed"""
         cur = await conn.execute(
-            sa.text("SELECT _id FROM url_list WHERE url = :url LIMIT 1"),
-            {"url": url}
+            sa.text(
+                "SELECT _id FROM document WHERE url = :url OR title = :title LIMIT 1"
+            ),
+            {"url": url, "title": title},
         )
-        url_id = cur.fetchone()
-        if url_id is None:
+        doc_id = cur.fetchone()
+        if doc_id is None:
             return False
 
         cur = await conn.execute(
-            sa.text("SELECT 1 FROM token_location WHERE url_id = :url_id LIMIT 1"),
-            {"url_id": url_id[0]}
+            sa.text("SELECT 1 FROM token_position WHERE doc_id = :doc_id LIMIT 1"),
+            {"doc_id": doc_id[0]},
         )
         tok_row = cur.fetchone()
         return bool(tok_row)
 
-    async def add_link_ref(self, conn: AsyncConnection, url_from: str, url_to: str, link_text):
+    async def add_link_ref(
+        self, conn: AsyncConnection, url_from: str, url_to: str, link_text
+    ):
         """Add a link between two pages"""
         pass
 
