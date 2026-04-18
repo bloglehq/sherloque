@@ -97,30 +97,6 @@ class CrawlerBase:
             )
         LOG.info(f"Finished indexing URL: {url}")
 
-    async def is_indexed(
-        self,
-        conn: AsyncConnection,
-        url: Optional[str] = None,
-        title: Optional[str] = None,
-    ) -> bool:
-        """Return True if this URL is already indexed"""
-        cur = await conn.execute(
-            sa.text(
-                "SELECT _id FROM document WHERE url = :url OR title = :title LIMIT 1"
-            ),
-            {"url": url, "title": title},
-        )
-        doc_id = cur.fetchone()
-        if doc_id is None:
-            return False
-
-        cur = await conn.execute(
-            sa.text("SELECT 1 FROM token_position WHERE doc_id = :doc_id LIMIT 1"),
-            {"doc_id": doc_id[0]},
-        )
-        tok_row = cur.fetchone()
-        return bool(tok_row)
-
     async def add_link_ref(
         self, conn: AsyncConnection, url_from: str, url_to: str, link_text
     ):

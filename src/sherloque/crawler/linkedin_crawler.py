@@ -54,9 +54,6 @@ class LIEnggBlogCrawler(CrawlerBase):
                 )
                 for page in pages:
                     LOG.info(f"Starting crawling for page: {page}")
-                    if await self.is_indexed(conn=conn, url=page):
-                        LOG.info(f"URL {page} already indexed. Skipping ...")
-                        continue
                     try:
                         c = request.urlopen(page)
                     except Exception as e:
