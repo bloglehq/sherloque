@@ -13,3 +13,6 @@ wheels/
 .env*
 
 .idea/
+
+# misc
+ignored/

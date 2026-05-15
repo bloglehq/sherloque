@@ -50,18 +50,37 @@ class CrawlerBase:
             raise RuntimeError(f"Failed to insert into {table} ({field})")
         return row[0]
 
-    async def add_to_index(self, conn: AsyncConnection, url: str, text: str):
+    async def add_to_index(
+        self,
+        conn: AsyncConnection,
+        url: str,
+        text: str,
+        title: Optional[str] = None,
+    ) -> int:
         """Index an individual page"""
         LOG.info(f"Indexing URL: {url}")
+        cur = await conn.execute(
+            sa.text("""
+                    SELECT _id
+                    FROM document
+                    WHERE url = :url
+                    """),
+            {"url": url},
+        )
+        row = cur.fetchone()
+        if row is not None:
+            LOG.info(f"URL {url} already indexed. Skipping ...")
+            return row[0]
+
         processed_toks = await self.preprocess(text)
         doc_len = len(processed_toks)
         cur = await conn.execute(
             sa.text("""
-                    INSERT INTO document (full_text, url, len)
-                    VALUES (:full_text, :url, :len)
+                    INSERT INTO document (full_text, url, title, len)
+                    VALUES (:full_text, :url, :title, :len)
                     RETURNING _id
                     """),
-            {"full_text": text, "url": url, "len": doc_len},
+            {"full_text": text, "url": url, "title": title, "len": doc_len},
         )
         row = cur.fetchone()
         if row is None:
@@ -92,10 +111,11 @@ class CrawlerBase:
                         UPDATE token
                         SET doc_freq = doc_freq + 1
                         WHERE _id = :token_id
-                        """),
+                """),
                 {"token_id": token_id},
             )
         LOG.info(f"Finished indexing URL: {url}")
+        return doc_id
 
     async def add_link_ref(
         self, conn: AsyncConnection, url_from: str, url_to: str, link_text

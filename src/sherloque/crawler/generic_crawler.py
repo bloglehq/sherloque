@@ -20,12 +20,16 @@ class GenericCrawler(CrawlerBase):
 
         super().__init__(engine=engine)
 
-    def __repr__(self) -> str:
-        return "Generic crawler."
-
     async def get_text_only(self, soup: BeautifulSoup) -> str:
         """Extract the text from an HTML page (no tags)"""
         return soup.get_text().replace("\n\n", '')
+
+    @staticmethod
+    def get_title(soup: BeautifulSoup) -> str | None:
+        if soup.title is None or soup.title.string is None:
+            return None
+        title = soup.title.string.strip()
+        return title or None
 
     async def crawl(self, pages: list[str], *args, **kwargs):
         """Fetch each page, extract text, and index it"""
@@ -41,8 +45,9 @@ class GenericCrawler(CrawlerBase):
 
                 soup = BeautifulSoup(c.read(), "html.parser")
                 text = await self.get_text_only(soup)
+                title = self.get_title(soup)
                 LOG.info(f"Text obtained for page: {page}")
-                await self.add_to_index(conn=conn, url=page, text=text)
+                await self.add_to_index(conn=conn, url=page, text=text, title=title)
                 await conn.commit()
 
 
