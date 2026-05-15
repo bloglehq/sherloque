@@ -15,10 +15,13 @@ ALLOWED_TABLE_FIELDS = {
 
 
 async def preprocess_text(text: str) -> list[str]:
-    """Tokenize and stem the text using NLTK"""
-    toks = word_tokenize(text)
+    """Lowercase, tokenize, drop non-alphanumeric tokens, and lemmatize."""
     lemmatizer = WordNetLemmatizer()
-    return [lemmatizer.lemmatize(tok) for tok in toks]
+    return [
+        lemmatizer.lemmatize(tok)
+        for tok in word_tokenize(text.lower())
+        if any(ch.isalnum() for ch in tok)
+    ]
 
 
 def insert_async_conn(engine: AsyncEngine):
