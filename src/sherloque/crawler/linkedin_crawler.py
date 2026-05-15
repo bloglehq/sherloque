@@ -28,6 +28,13 @@ class LIEnggBlogCrawler(CrawlerBase):
         return soup.get_text().replace("\n\n", "")
 
     @staticmethod
+    def get_title(soup: BeautifulSoup) -> str | None:
+        if soup.title is None or soup.title.string is None:
+            return None
+        title = soup.title.string.strip()
+        return title or None
+
+    @staticmethod
     async def _get_related_articles_soups(soup: BeautifulSoup) -> list[BeautifulSoup]:
         """
         From a engineering blog, parse and return the blog links present in 'Related Articles'
@@ -63,7 +70,8 @@ class LIEnggBlogCrawler(CrawlerBase):
 
                     soup = BeautifulSoup(c.read(), "html.parser")
                     text = await self.get_text_only(soup)
-                    await self.add_to_index(conn=conn, url=page, text=text)
+                    title = self.get_title(soup)
+                    await self.add_to_index(conn=conn, url=page, text=text, title=title)
                     links = await self._get_related_articles_soups(soup)
                     LOG.info(
                         f"Retrieved {len(links)} related articles for page: {page}"
