@@ -43,7 +43,7 @@ class Settings(DefaultSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    env_file = Path(__file__).parent / ".env"
+    env_file = Path(__file__).parent.parent / ".env"
     load_dotenv(dotenv_path=env_file)
     return Settings()
 
