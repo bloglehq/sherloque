@@ -32,7 +32,7 @@ if str(SRC_DIR) not in sys.path:
 
 load_dotenv(SRC_DIR / "sherloque" / ".env")
 
-from config import get_async_engine  # noqa: E402
+from sherloque.config import get_async_engine  # noqa: E402
 from sherloque.crawler.base import CrawlerBase  # noqa: E402
 from sherloque.utils import preprocess_text  # noqa: E402
 
