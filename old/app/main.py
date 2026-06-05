@@ -3,7 +3,7 @@ import time
 from fastapi import FastAPI, Request
 
 from app.config import get_async_lifespan
-from app.routes.api_routes import router as api_router
+from old.app.routes.api_routes import router as api_router
 
 app = FastAPI(
     lifespan=get_async_lifespan(),
