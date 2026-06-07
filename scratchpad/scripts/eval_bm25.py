@@ -166,7 +166,7 @@ async def run_queries(
     sem = asyncio.Semaphore(concurrency)
 
     async def score_one(qid: str, qtext: str) -> tuple[str, dict[str, float]]:
-        tokens = await preprocess_text(qtext)
+        tokens = preprocess_text(qtext)
         if not tokens:
             return qid, {}
         async with sem, engine.connect() as conn:

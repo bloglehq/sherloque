@@ -138,6 +138,9 @@ def ensure_nltk_resources() -> None:
 
 async def create_index_tables(engine: AsyncEngine):
     async with engine.connect() as conn:
+        # pgvector must exist before the document.embedding column references
+        # the `vector` type.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(
             text("""
                  CREATE TABLE IF NOT EXISTS document
@@ -147,6 +150,7 @@ async def create_index_tables(engine: AsyncEngine):
                      url       TEXT,
                      title     TEXT,
                      len       INTEGER NOT NULL CHECK (len >= 0),
+                     embedding VECTOR(768),
                      CHECK (url IS NOT NULL OR title IS NOT NULL)
                  )
                  """),
@@ -206,6 +210,13 @@ async def create_index_tables(engine: AsyncEngine):
         await conn.execute(text("CREATE INDEX IF NOT EXISTS term_doc_stats_doc_id_idx ON term_doc_stats(doc_id)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS link_to_doc_id_idx ON link(to_doc_id)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS link_from_doc_id_idx ON link(from_doc_id)"))
+
+        # HNSW ANN index for vector retrieval. Cosine opclass must match the
+        # `<=>` operator the VectorRetriever queries with.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS document_embedding_hnsw "
+            "ON document USING hnsw (embedding vector_cosine_ops)"
+        ))
 
         await conn.commit()
 

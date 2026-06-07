@@ -17,7 +17,7 @@ class CrawlerBase:
         self.engine = engine
 
     async def preprocess(self, text: str) -> list[str]:
-        return await preprocess_text(text)
+        return preprocess_text(text)
 
     async def _get_entry_id(
         self,
