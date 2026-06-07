@@ -4,7 +4,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from pgvector.asyncpg import register_vector
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 
@@ -51,12 +53,21 @@ def get_settings() -> Settings:
 @lru_cache()
 def get_async_engine() -> AsyncEngine:
     settings = get_settings()
-    return create_async_engine(
+    engine = create_async_engine(
         settings.engine_async_str,
         pool_size=5,
         max_overflow=10,
         pool_pre_ping=True,
     )
+
+    # Register the pgvector type on every new asyncpg connection so vector
+    # columns bind/return as Python lists (no manual ::vector string casts).
+    # run_async hands the raw asyncpg connection to register_vector.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _register_pgvector(dbapi_connection, _connection_record):
+        dbapi_connection.run_async(register_vector)
+
+    return engine
 
 
 @lru_cache()
