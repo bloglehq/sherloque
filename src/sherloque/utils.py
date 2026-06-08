@@ -2,6 +2,7 @@ import asyncio
 import math
 from functools import lru_cache
 
+import httpx
 from nltk import word_tokenize, WordNetLemmatizer
 from openai import AsyncOpenAI, RateLimitError
 
@@ -83,7 +84,61 @@ async def get_embedding(
     return _l2_normalize(vec) if normalize else vec
 
 
+async def rerank(
+    *,
+    model: str,
+    query: str,
+    documents: list[str],
+) -> list[tuple[int, float]]:
+    """Rerank `documents` against `query` via the Fireworks /v1/rerank endpoint.
+
+    Returns a list of `(original_index, relevance_score)` pairs, sorted by score
+    descending. `original_index` is the position of the document in the
+    `documents` list you passed in.
+
+    IMPORTANT: the API reorders results by score and does NOT preserve input
+    order. Associate each result back to your data via `original_index` — NEVER
+    by position in the returned list. So the caller should keep its docs in a
+    stable order (e.g. a parallel `[doc_id, ...]` list) and look up `doc_ids[original_index]`.
+
+    Note: the OpenAI SDK has no rerank method, so this is a raw POST. Scores are
+    peaky "yes"-probabilities (relevant ~0.7, irrelevant ~1e-6) — use for
+    ordering, not as calibrated confidence.
+    """
+    payload: dict = {
+        "model": model,
+        "query": query,
+        "documents": documents,
+        "return_documents": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {get_settings().fireworks_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Retry with exponential backoff on Fireworks rate limits (429).
+    delay = 2.0
+    max_attempts = 12
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for attempt in range(max_attempts):
+            resp = await client.post(
+                f"{FIREWORKS_BASE_URL}/rerank", headers=headers, json=payload
+            )
+            if resp.status_code == 429 and attempt < max_attempts - 1:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+                continue
+            resp.raise_for_status()
+            data = resp.json()["data"]
+            # API returns sorted desc already; sort defensively to be safe.
+            pairs = [(item["index"], item["relevance_score"]) for item in data]
+            return sorted(pairs, key=lambda p: p[1], reverse=True)
+    raise RuntimeError("unreachable")
+
+
 __all__ = [
     "preprocess_text",
     "get_embedding",
+    "rerank",
 ]
