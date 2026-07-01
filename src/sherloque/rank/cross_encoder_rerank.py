@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from sherloque.retrieve import RetrieverResult
-from sherloque.utils import rerank
+from sherloque.model_providers import BaseClient
 
 
 class CrossEncoderReRanker:
@@ -16,8 +16,9 @@ class CrossEncoderReRanker:
         # @formatter:on
     )
 
-    def __init__(self, engine: AsyncEngine):
+    def __init__(self, engine: AsyncEngine, model_client: BaseClient):
         self.engine = engine
+        self.model_client = model_client
 
     async def rank(self, *, query: str, candidates: list[RetrieverResult], top_k: int) -> list[RetrieverResult]:
         if not candidates:
@@ -33,8 +34,7 @@ class CrossEncoderReRanker:
         # db results may be in different order than candidates, so map back to `candidates` order
         doc_texts = [id_to_doc_texts.get(c.doc_id, "") for c in candidates]
 
-        rerank_results = await rerank(
-            model="fireworks/qwen3-reranker-8b",
+        rerank_results = await self.model_client.rerank(
             query=query,
             documents=doc_texts,
         )

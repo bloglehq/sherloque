@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from .base import Retriever, RetrieverResult
+from .base import BaseRetriever, RetrieverResult
 from sherloque.utils import get_embedding
 
 
@@ -28,7 +28,7 @@ class VectorRetrieverConfig:
     top_k: int = 10
 
 
-class VectorRetriever(Retriever):
+class VectorRetriever(BaseRetriever):
     VECTOR_RETRIEVE_SQL = text(
         # @formatter:off
         """

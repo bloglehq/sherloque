@@ -4,7 +4,7 @@ from nltk import word_tokenize, WordNetLemmatizer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from .base import RetrieverResult, Retriever
+from .base import RetrieverResult, BaseRetriever
 
 @dataclass
 class BM25RetrieverConfig:
@@ -13,7 +13,7 @@ class BM25RetrieverConfig:
     top_k: int = 10
 
 
-class BM25Retriever(Retriever):
+class BM25Retriever(BaseRetriever):
     BM25_SQL = text(
         # @formatter:off
         """

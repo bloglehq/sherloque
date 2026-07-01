@@ -10,7 +10,7 @@ class RetrieverResult(BaseModel):
     score: float = Field(..., description="The score of the retrieved document.")
 
 
-class Retriever(ABC):
+class BaseRetriever(ABC):
     @abstractmethod
     async def retrieve(self, *, query: str, **kwargs) -> list[RetrieverResult]: ...
 
@@ -36,6 +36,6 @@ def reciprocal_rank_fusion(
 
 __all__ = [
     "RetrieverResult",
-    "Retriever",
+    "BaseRetriever",
     "reciprocal_rank_fusion",
 ]

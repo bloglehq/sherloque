@@ -2,7 +2,7 @@ import logging
 
 from sherloque import log_config
 from sherloque.rank import CrossEncoderReRanker
-from sherloque.retrieve import Retriever, reciprocal_rank_fusion
+from sherloque.retrieve import BaseRetriever, reciprocal_rank_fusion
 
 log_config.setup()
 
@@ -10,7 +10,7 @@ LOG = logging.getLogger(__name__)
 
 
 class QueryEngine:
-    def __init__(self, retrievers: list[Retriever], rankers: list[CrossEncoderReRanker]):
+    def __init__(self, retrievers: list[BaseRetriever], rankers: list[CrossEncoderReRanker]):
         self.retrievers = retrievers
         self.rankers = rankers
 
