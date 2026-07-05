@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from sherloque.retrieve import RetrieverResult
-from sherloque.model_providers import BaseClient
+from sherloque.model_providers import BaseModelProvider
 
 
 class CrossEncoderReRanker:
@@ -16,7 +16,7 @@ class CrossEncoderReRanker:
         # @formatter:on
     )
 
-    def __init__(self, engine: AsyncEngine, model_client: BaseClient):
+    def __init__(self, engine: AsyncEngine, model_client: BaseModelProvider):
         self.engine = engine
         self.model_client = model_client
 

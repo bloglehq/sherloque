@@ -5,7 +5,7 @@ import httpx
 from ._retry import with_retry
 
 
-class BaseClient(ABC):
+class BaseModelProvider(ABC):
     def __init__(self, http_client: httpx.AsyncClient):
         self.http_client = http_client
 
@@ -25,5 +25,5 @@ class BaseClient(ABC):
 
 
 __all__ = [
-    "BaseClient",
+    "BaseModelProvider",
 ]

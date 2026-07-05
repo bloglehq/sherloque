@@ -1,7 +1,7 @@
-from .fireworks import FireworksClient
-from .base import BaseClient
+from .fireworks import FireworksModelProvider
+from .base import BaseModelProvider
 
 __all__ = [
-    "FireworksClient",
-    "BaseClient",
+    "FireworksModelProvider",
+    "BaseModelProvider",
 ]

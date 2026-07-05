@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .base import BaseRetriever, RetrieverResult
-from sherloque.utils import get_embedding
+from sherloque.model_providers import BaseModelProvider
 
 
 # Qwen3-Embedding is asymmetric via INSTRUCTIONS (not nomic-style prefixes):
@@ -24,7 +24,6 @@ def _format_query(query: str) -> str:
 
 @dataclass
 class VectorRetrieverConfig:
-    embedding_model: str
     top_k: int = 10
 
 
@@ -40,19 +39,20 @@ class VectorRetriever(BaseRetriever):
         # @formatter:on
     )
 
-    def __init__(self, engine: AsyncEngine, config: VectorRetrieverConfig):
+    def __init__(self, engine: AsyncEngine, config: VectorRetrieverConfig, model_client: BaseModelProvider):
         self.engine = engine
         self.config = config
+        self.model_client = model_client
 
     async def retrieve(self, *, query: str, top_k: int | None = None) -> list[RetrieverResult]:
         top_k = top_k or self.config.top_k
 
-        query_embedding = await get_embedding(
-            model=self.config.embedding_model,
-            text=_format_query(query),
+        embeddings = await self.model_client.embed(
+            documents=[_format_query(query)],
             dimensions=EMBED_DIM,
             normalize=True,
         )
+        query_embedding = embeddings[0]
         async with self.engine.connect() as conn:
             cur = await conn.execute(
                 self.VECTOR_RETRIEVE_SQL,
