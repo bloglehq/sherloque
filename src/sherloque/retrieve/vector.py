@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from .base import BaseRetriever, RetrieverResult
 from sherloque.model_providers import BaseModelProvider
 
-
 # Qwen3-Embedding is asymmetric via INSTRUCTIONS (not nomic-style prefixes):
 # documents are embedded raw, queries are wrapped as
 #   `Instruct: {task}\nQuery: {query}`.
@@ -16,10 +15,6 @@ QWEN3_QUERY_TASK = (
     "Given a search query, retrieve relevant documents that answer the query"
 )
 EMBED_DIM = 768
-
-
-def _format_query(query: str) -> str:
-    return f"Instruct: {QWEN3_QUERY_TASK}\nQuery: {query}"
 
 
 @dataclass
@@ -48,7 +43,7 @@ class VectorRetriever(BaseRetriever):
         top_k = top_k or self.config.top_k
 
         embeddings = await self.model_client.embed(
-            documents=[_format_query(query)],
+            documents=[f"Instruct: {QWEN3_QUERY_TASK}\nQuery: {query}"],
             dimensions=EMBED_DIM,
             normalize=True,
         )
