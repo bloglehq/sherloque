@@ -1,5 +1,3 @@
-import math
-
 import httpx
 
 from .base import BaseModelProvider
@@ -13,10 +11,12 @@ class FireworksModelProvider(BaseModelProvider):
 
     def __init__(
         self,
+        base_url: str = BASE_URL,
         api_key: str | None = None,
         rerank_model: str = "fireworks/qwen3-reranker-8b",
         embed_model: str = "fireworks/qwen3-embedding-8b",
     ):
+        self.BASE_URL = base_url
         self.api_key = api_key
         self.rerank_model = rerank_model
         self.embed_model = embed_model
@@ -30,14 +30,6 @@ class FireworksModelProvider(BaseModelProvider):
                 base_url=self.BASE_URL,
             )
         )
-
-    @staticmethod
-    def _l2_normalize(vec: list[float]) -> list[float]:
-        """Scale a vector to unit L2 norm."""
-        norm = math.sqrt(sum(v * v for v in vec))
-        if norm == 0.0:
-            return vec
-        return [v / norm for v in vec]
 
     async def embed(
         self,
