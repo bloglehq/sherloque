@@ -80,6 +80,7 @@ if str(SRC_DIR) not in sys.path:
 load_dotenv(SRC_DIR / ".env")
 
 from sherloque.config import get_async_engine, get_settings  # noqa: E402
+from sherloque.index import PostgresIndex  # noqa: E402
 from sherloque.crawler.base import CrawlerBase  # noqa: E402
 from sherloque.model_providers import (  # noqa: E402
     BaseModelProvider,
@@ -360,9 +361,12 @@ async def run_all_modes(
         if text_attr:
             queries.append((query.query_id, text_attr))
 
-    bm25 = BM25Retriever(engine, BM25RetrieverConfig(k1=k1, b=b, top_k=top_k))
+    async with engine.connect() as connection:
+        schema = (await connection.execute(text("SELECT current_schema()"))).scalar_one()
+    index = PostgresIndex(engine, schema)
+    bm25 = BM25Retriever(index, BM25RetrieverConfig(k1=k1, b=b, top_k=top_k))
     vector = VectorRetriever(
-        engine,
+        index,
         VectorRetrieverConfig(top_k=top_k),
         embedding_model,
     )
