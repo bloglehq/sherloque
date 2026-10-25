@@ -1,7 +1,29 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
 from sqlalchemy import text
 
+from sherloque.index import PostgresIndex
 from sherloque.retrieve.bm25 import BM25Retriever, BM25RetrieverConfig
 from tests.database import DatabaseTestCase
+
+
+class BM25RetrieverUnitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_awaits_index_and_preserves_zero_overrides(self) -> None:
+        index = MagicMock(spec=PostgresIndex)
+        index.retrieve_bm25 = AsyncMock(
+            return_value=[SimpleNamespace(doc_id=7, doc_title=None, score=0.5)]
+        )
+        retriever = BM25Retriever(index, BM25RetrieverConfig())
+
+        results = await retriever.retrieve(query="banana recipes", k1=0, b=0, top_k=0)
+
+        index.retrieve_bm25.assert_awaited_once_with(
+            tokens=["banana", "recipe"], k1=0, b=0, top_k=0
+        )
+        self.assertEqual(results[0].doc_id, 7)
+        self.assertEqual(results[0].doc_title, "")
 
 
 class BM25RetrieverTests(DatabaseTestCase):
@@ -58,7 +80,7 @@ class BM25RetrieverTests(DatabaseTestCase):
                     },
                 )
 
-        self.retriever = BM25Retriever(self.engine, BM25RetrieverConfig())
+        self.retriever = BM25Retriever(self.index, BM25RetrieverConfig())
 
     async def test_matching_document_ranks_first(self) -> None:
         results = await self.retriever.retrieve(query="banana recipes")
@@ -75,6 +97,7 @@ class BM25RetrieverTests(DatabaseTestCase):
         self.assertEqual(len(results), 2)
         self.assertGreaterEqual(results[0].score, results[1].score)
         self.assertEqual(await self.retriever.retrieve(query="astronomy"), [])
+        self.assertEqual(await self.retriever.retrieve(query="banana", top_k=0), [])
 
     async def test_returns_empty_title_for_an_untitled_document(self) -> None:
         async with self.engine.begin() as connection:

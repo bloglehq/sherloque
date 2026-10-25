@@ -116,11 +116,11 @@ class SearchPipelineTests(DatabaseTestCase):
         engine = QueryEngine(
             retrievers=[
                 BM25Retriever(
-                    self.engine,
+                    self.index,
                     BM25RetrieverConfig(top_k=3),
                 ),
                 VectorRetriever(
-                    self.engine,
+                    self.index,
                     VectorRetrieverConfig(top_k=3),
                     model,
                 ),
