@@ -6,6 +6,7 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from sherloque.config import get_settings
+from sherloque.index import PostgresIndex
 
 
 class DatabaseTestCase(unittest.IsolatedAsyncioTestCase):
@@ -24,6 +25,7 @@ class DatabaseTestCase(unittest.IsolatedAsyncioTestCase):
                 "server_settings": {"search_path": f"{self.schema},public"}
             },
         )
+        self.index = PostgresIndex(self.engine, self.schema)
 
         @event.listens_for(self.engine.sync_engine, "connect")
         def register_vector_type(dbapi_connection, _connection_record):
@@ -36,7 +38,9 @@ class DatabaseTestCase(unittest.IsolatedAsyncioTestCase):
                     """
                     CREATE TABLE document (
                         _id SERIAL PRIMARY KEY,
-                        title TEXT NOT NULL,
+                        -- Production documents may have only a URL or body;
+                        -- keep the fixture's nullability aligned with init_db.
+                        title TEXT,
                         full_text TEXT NOT NULL,
                         len INTEGER NOT NULL,
                         embedding VECTOR(768)

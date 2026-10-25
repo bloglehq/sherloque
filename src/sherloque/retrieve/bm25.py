@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
 from nltk import word_tokenize, WordNetLemmatizer
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .base import RetrieverResult, BaseRetriever
+from sherloque.index import PostgresIndex
+
 
 @dataclass
 class BM25RetrieverConfig:
@@ -14,37 +14,8 @@ class BM25RetrieverConfig:
 
 
 class BM25Retriever(BaseRetriever):
-    BM25_SQL = text(
-        # @formatter:off
-        """
-        WITH q_tokens AS (
-            SELECT t._id AS token_id, t.doc_freq
-            FROM token t
-            WHERE t.token = ANY(:tokens)
-        ), stats AS (
-            SELECT COUNT(*)::float AS total_docs, AVG(len) ::float AS avgdl
-            FROM document
-        )
-        SELECT d.title AS doc_title, d._id as doc_id, SUM(
-            LN(
-                (stats.total_docs - q.doc_freq + 0.5) / (q.doc_freq + 0.5) + 1
-            ) * (tds.tf * (:k1 + 1)) / (
-                tds.tf + :k1 * (1 - :b + :b * d.len / stats.avgdl)
-           )
-        ) ::float AS score
-        FROM term_doc_stats tds
-        JOIN q_tokens q ON tds.token_id = q.token_id
-        JOIN document d ON tds.doc_id = d._id
-        CROSS JOIN stats
-        GROUP BY d._id
-        ORDER BY score DESC
-        LIMIT :top_k
-        """
-        # @formatter:on
-    )
-
-    def __init__(self, engine: AsyncEngine, config: BM25RetrieverConfig):
-        self.engine = engine
+    def __init__(self, index: PostgresIndex, config: BM25RetrieverConfig):
+        self.index = index
         self.config = config
         self.lemmatizer = WordNetLemmatizer()
 
@@ -64,18 +35,13 @@ class BM25Retriever(BaseRetriever):
         b: float | None = None,
         top_k: int | None = None
     ) -> list[RetrieverResult]:
-        k1 = k1 or self.config.k1
-        b = b or self.config.b
-        top_k = top_k or self.config.top_k
+        k1 = self.config.k1 if k1 is None else k1
+        b = self.config.b if b is None else b
+        top_k = self.config.top_k if top_k is None else top_k
 
         tokens = self._preprocess_query(query)
-        async with self.engine.connect() as conn:
-            cur = await conn.execute(
-                self.BM25_SQL,
-                {"tokens": tokens, "k1": k1, "b": b, "top_k": top_k},
-            )
-            rows = [record for record in cur]
-        results = [RetrieverResult(doc_id=row.doc_id, doc_title=row.doc_title, score=row.score) for row in rows]
+        rows = await self.index.retrieve_bm25(tokens=tokens, k1=k1, b=b, top_k=top_k)
+        results = [RetrieverResult(doc_id=row.doc_id, doc_title=row.doc_title or "", score=row.score) for row in rows]
         return results
 
 
