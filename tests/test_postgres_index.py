@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.schema import DropSchema
 
 from sherloque.config import get_settings
+from sherloque.document import Document
 from sherloque.index import PostgresIndex
+from sherloque.retrieve import reciprocal_rank_fusion
 
 
 class PostgresIndexValidationTests(unittest.TestCase):
@@ -130,10 +132,22 @@ class PostgresIndexIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for index, title in ((self.index, "First index"), (other, "Second index")):
             lexical = await index.retrieve_bm25(["word"], 1.5, 0.75, 10)
             dense = await index.retrieve_vector(query_vector, 10)
-            self.assertEqual([row.doc_title for row in lexical], [title])
+            self.assertEqual([row.title for row in lexical], [title])
             self.assertAlmostEqual(lexical[0].score, math.log(4 / 3))
-            self.assertEqual([row.doc_title for row in dense], [title])
-            self.assertAlmostEqual(dense[0].distance, 0.0)
+            self.assertEqual([row.title for row in dense], [title])
+            self.assertAlmostEqual(dense[0].score, 1.0)
+            self.assertIsInstance(lexical[0], Document)
+            self.assertIsInstance(dense[0], Document)
+            self.assertEqual(lexical[0].text, "word")
+            self.assertEqual(dense[0].text, "word")
+            self.assertEqual(lexical[0].id, dense[0].id)
+            repeated_lexical = await index.retrieve_bm25(["word"], 1.5, 0.75, 10)
+            repeated_dense = await index.retrieve_vector(query_vector, 10)
+            self.assertEqual(repeated_lexical[0].id, lexical[0].id)
+            self.assertEqual(repeated_dense[0].id, dense[0].id)
+            fused = reciprocal_rank_fusion([lexical, dense])
+            self.assertEqual(len(fused), 1)
+            self.assertAlmostEqual(fused[0].score, 2 / 61)
             self.assertEqual(await index.retrieve_bm25([], 1.5, 0.75, 10), [])
             self.assertEqual(await index.retrieve_vector(query_vector, 0), [])
 

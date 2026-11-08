@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
-from nltk import word_tokenize, WordNetLemmatizer
+from nltk import WordNetLemmatizer, word_tokenize
 
-from .base import RetrieverResult, BaseRetriever
+from sherloque.document import Document
 from sherloque.index import PostgresIndex
+
+from .base import BaseRetriever
 
 
 @dataclass
@@ -34,18 +36,17 @@ class BM25Retriever(BaseRetriever):
         k1: float | None = None,
         b: float | None = None,
         top_k: int | None = None
-    ) -> list[RetrieverResult]:
+    ) -> list[Document]:
         k1 = self.config.k1 if k1 is None else k1
         b = self.config.b if b is None else b
         top_k = self.config.top_k if top_k is None else top_k
 
         tokens = self._preprocess_query(query)
-        rows = await self.index.retrieve_bm25(tokens=tokens, k1=k1, b=b, top_k=top_k)
-        results = [RetrieverResult(doc_id=row.doc_id, doc_title=row.doc_title or "", score=row.score) for row in rows]
-        return results
+        docs = await self.index.retrieve_bm25(tokens=tokens, k1=k1, b=b, top_k=top_k)
+        return docs
 
 
 __all__ = [
-    "BM25RetrieverConfig",
     "BM25Retriever",
+    "BM25RetrieverConfig",
 ]

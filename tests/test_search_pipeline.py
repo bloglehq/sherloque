@@ -113,12 +113,12 @@ class SearchPipelineTests(DatabaseTestCase):
                 )
 
         model = DeterministicSearchModel(query_embedding)
+        bm25 = BM25Retriever(self.index, BM25RetrieverConfig(top_k=3))
+        lexical_candidates = await bm25.retrieve(query="python")
+        expected_document = next(doc for doc in lexical_candidates if doc.title == "Semantic answer")
         engine = QueryEngine(
             retrievers=[
-                BM25Retriever(
-                    self.index,
-                    BM25RetrieverConfig(top_k=3),
-                ),
+                bm25,
                 VectorRetriever(
                     self.index,
                     VectorRetrieverConfig(top_k=3),
@@ -143,10 +143,14 @@ class SearchPipelineTests(DatabaseTestCase):
                 "Banana bread recipe",
             },
         )
-        self.assertEqual(results[0].doc_title, "Semantic answer")
-        self.assertEqual(results[0].doc_id, document_ids["Semantic answer"])
+        self.assertEqual(len(model.rerank_documents), 3)
+        self.assertEqual(len(results), 3)
+        self.assertEqual(len({result.id for result in results}), 3)
+        self.assertEqual(results[0].title, "Semantic answer")
+        self.assertEqual(results[0].id, expected_document.id)
+        self.assertEqual(results[0].text, "An asyncio guide for Python concurrency")
         self.assertEqual(results[0].score, 1.0)
         self.assertEqual(
-            {result.doc_title for result in results},
+            {result.title for result in results},
             {"Lexical distractor", "Semantic answer", "Unrelated"},
         )

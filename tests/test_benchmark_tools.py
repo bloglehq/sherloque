@@ -4,12 +4,17 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import httpx
+from sqlalchemy import text
+
 from sherloque.model_providers import (
     FireworksModelProvider,
     OpenRouterModelProvider,
 )
+from tests.database import DatabaseTestCase
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +152,83 @@ class EvaluationCheckpointTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(httpx.HTTPStatusError):
             await eval_retrieval.with_provider_backoff(operation)
         self.assertEqual(attempts, 1)
+
+
+class EvaluationDocumentMappingTests(DatabaseTestCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.query_embedding = [1.0] + [0.0] * 767
+        async with self.engine.begin() as connection:
+            await connection.execute(text("ALTER TABLE document ADD COLUMN url TEXT"))
+            token_id = (
+                await connection.execute(
+                    text("""
+                        INSERT INTO token (token, doc_freq)
+                        VALUES ('search', 2) RETURNING _id
+                    """)
+                )
+            ).scalar_one()
+            for title, body, url, embedding in (
+                ("Answer", "search asyncio answer", "beir-answer", self.query_embedding),
+                ("Other", "search other answer", "beir-other", [0.0, 1.0] + [0.0] * 766),
+            ):
+                doc_id = (
+                    await connection.execute(
+                        text("""
+                            INSERT INTO document (title, full_text, url, len, embedding)
+                            VALUES (:title, :body, :url, 3, :embedding)
+                            RETURNING _id
+                        """),
+                        {"title": title, "body": body, "url": url, "embedding": embedding},
+                    )
+                ).scalar_one()
+                await connection.execute(
+                    text("""
+                        INSERT INTO term_doc_stats (doc_id, token_id, tf)
+                        VALUES (:doc_id, :token_id, 1)
+                    """),
+                    {"doc_id": doc_id, "token_id": token_id},
+                )
+
+    async def test_lookup_keys_match_public_document_ids(self) -> None:
+        documents = await self.index.retrieve_bm25(["search"], 1.5, 0.75, 10)
+
+        mapping = await eval_retrieval.load_id_to_url(self.engine)
+
+        self.assertEqual(mapping, {
+            document.id: "beir-answer" if document.title == "Answer" else "beir-other"
+            for document in documents
+        })
+
+    async def test_all_modes_emit_original_benchmark_ids(self) -> None:
+        async def rerank(*, query, documents):
+            return sorted(
+                [(i, 1.0 if "asyncio" in body else 0.1) for i, body in enumerate(documents)],
+                key=lambda item: item[1], reverse=True,
+            )
+
+        provider = SimpleNamespace(
+            embed_model="fixture-embedding", rerank_model="fixture-reranker",
+            embed=AsyncMock(return_value=[self.query_embedding]),
+            rerank=AsyncMock(side_effect=rerank),
+        )
+        dataset = SimpleNamespace(
+            queries_iter=lambda: iter([SimpleNamespace(query_id="query-1", text="search")])
+        )
+        mapping = await eval_retrieval.load_id_to_url(self.engine)
+
+        with patch.object(eval_retrieval.ir_datasets, "load", return_value=dataset):
+            runs, _ = await eval_retrieval.run_all_modes(
+                self.engine, provider, provider, "fixture", mapping,
+                k1=1.5, b=0.75, top_k=10, rrf_k=60, concurrency=1,
+            )
+
+        for mode in ("bm25", "vector", "rrf", "reranked"):
+            with self.subTest(mode=mode):
+                self.assertEqual(set(runs[mode]["query-1"]), {"beir-answer", "beir-other"})
+        self.assertEqual(runs["vector"]["query-1"]["beir-answer"], 1.0)
+        self.assertEqual(runs["vector"]["query-1"]["beir-other"], 0.0)
+        self.assertEqual(runs["reranked"]["query-1"], {"beir-answer": 1.0, "beir-other": 0.1})
 
 
 class ReembeddingCheckpointTests(unittest.TestCase):

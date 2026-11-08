@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
-from .base import BaseRetriever, RetrieverResult
+from sherloque.document import Document
 from sherloque.index import PostgresIndex
 from sherloque.model_providers import BaseModelProvider
+
+from .base import BaseRetriever
 
 # Qwen3-Embedding is asymmetric via INSTRUCTIONS (not nomic-style prefixes):
 # documents are embedded raw, queries are wrapped as
@@ -26,7 +28,7 @@ class VectorRetriever(BaseRetriever):
         self.config = config
         self.model_client = model_client
 
-    async def retrieve(self, *, query: str, top_k: int | None = None) -> list[RetrieverResult]:
+    async def retrieve(self, *, query: str, top_k: int | None = None) -> list[Document]:
         top_k = self.config.top_k if top_k is None else top_k
 
         embeddings = await self.model_client.embed(
@@ -35,15 +37,7 @@ class VectorRetriever(BaseRetriever):
             normalize=True,
         )
         query_embedding = embeddings[0]
-        rows = await self.index.retrieve_vector(query_embedding=query_embedding, top_k=top_k)
-        return [
-            RetrieverResult(
-                doc_id=row.doc_id,
-                doc_title=row.doc_title or "",
-                score=1 - row.distance,
-            )
-            for row in rows
-        ]
+        return await self.index.retrieve_vector(query_embedding=query_embedding, top_k=top_k)
 
 
 __all__ = [
