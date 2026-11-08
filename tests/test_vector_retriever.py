@@ -1,10 +1,10 @@
 import math
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy import text
 
+from sherloque.document import Document
 from sherloque.index import PostgresIndex
 from sherloque.retrieve.vector import (
     EMBED_DIM,
@@ -51,23 +51,24 @@ class VectorRetrieverUnitTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(index.retrieve_vector.await_args.kwargs["top_k"], 0)
 
-    async def test_converts_distances_to_scores_without_reordering(self) -> None:
+    async def test_preserves_documents_scores_and_order_from_the_index(self) -> None:
         index = MagicMock(spec=PostgresIndex)
-        index.retrieve_vector = AsyncMock(return_value=[
-            SimpleNamespace(doc_id=1, doc_title=None, distance=0.0),
-            SimpleNamespace(doc_id=2, doc_title="Related", distance=0.25),
-            SimpleNamespace(doc_id=3, doc_title="Unrelated", distance=1.0),
-            SimpleNamespace(doc_id=4, doc_title="Opposite", distance=2.0),
-        ])
+        documents = [
+            Document(id="closest", text="Closest document", score=1.0),
+            Document(id="related", title="Related", text="Related document", score=0.75),
+            Document(id="unrelated", title="Unrelated", text="Unrelated document", score=0.0),
+            Document(id="opposite", title="Opposite", text="Opposite document", score=-1.0),
+        ]
+        index.retrieve_vector = AsyncMock(return_value=documents)
         model = MagicMock()
         model.embed = AsyncMock(return_value=[[1.0] + [0.0] * (EMBED_DIM - 1)])
         retriever = VectorRetriever(index, VectorRetrieverConfig(), model)
 
         results = await retriever.retrieve(query="anything")
 
-        self.assertEqual([result.doc_id for result in results], [1, 2, 3, 4])
+        self.assertEqual(results, documents)
         self.assertEqual([result.score for result in results], [1.0, 0.75, 0.0, -1.0])
-        self.assertEqual(results[0].doc_title, "")
+        self.assertIsNone(results[0].title)
 
 
 class VectorRetrieverIntegrationTests(DatabaseTestCase):
@@ -104,7 +105,7 @@ class VectorRetrieverIntegrationTests(DatabaseTestCase):
         results = await retriever.retrieve(query="anything", top_k=2)
 
         self.assertEqual(
-            [result.doc_title for result in results],
+            [result.title for result in results],
             ["Closest", "Related"],
         )
         self.assertAlmostEqual(results[0].score, 1.0)
@@ -112,11 +113,12 @@ class VectorRetrieverIntegrationTests(DatabaseTestCase):
         self.assertGreater(results[0].score, results[1].score)
 
         rows = await self.index.retrieve_vector(self.query_vector, top_k=3)
-        self.assertEqual([row.doc_title for row in rows], ["Closest", "Related", "Unrelated"])
-        for row, expected in zip(rows, (0.0, 1 - math.sqrt(0.5), 1.0), strict=True):
-            self.assertAlmostEqual(row.distance, expected, places=6)
+        self.assertEqual([row.title for row in rows], ["Closest", "Related", "Unrelated"])
+        for row, expected in zip(rows, (1.0, math.sqrt(0.5), 0.0), strict=True):
+            self.assertIsInstance(row, Document)
+            self.assertAlmostEqual(row.score, expected, places=6)
 
-    async def test_returns_empty_title_for_an_untitled_document(self) -> None:
+    async def test_returns_none_title_for_an_untitled_document(self) -> None:
         async with self.engine.begin() as connection:
             await connection.execute(
                 text(
@@ -133,7 +135,8 @@ class VectorRetrieverIntegrationTests(DatabaseTestCase):
 
         results = await retriever.retrieve(query="anything", top_k=4)
 
-        self.assertIn("", [result.doc_title for result in results])
+        untitled = next(result for result in results if result.text == "Untitled")
+        self.assertIsNone(untitled.title)
 
     async def test_excludes_documents_without_embeddings(self) -> None:
         async with self.engine.begin() as connection:

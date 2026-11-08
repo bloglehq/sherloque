@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
@@ -9,7 +12,6 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
-    Row,
     Table,
     Text,
     UniqueConstraint,
@@ -24,6 +26,8 @@ from sqlalchemy.ext.asyncio.engine import AsyncEngine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.schema import CreateSchema
 
+from sherloque.document import Document
+
 
 class _SchemaVector(Vector):
     """pgvector's usual value conversion with a schema-qualified SQL type."""
@@ -36,7 +40,7 @@ class _SchemaVector(Vector):
 
 
 @compiles(_SchemaVector, "postgresql")
-def _compile_schema_vector(vector_type, compiler, **kwargs):
+def _compile_schema_vector(vector_type, compiler, **_kwargs):
     schema = compiler.dialect.identifier_preparer.quote_identifier(vector_type.schema)
     return f"{schema}.vector({vector_type.dim})"
 
@@ -61,7 +65,7 @@ class PostgresIndex:
             SELECT COUNT(*)::float AS total_docs, AVG(len) ::float AS avgdl
             FROM {document}
         )
-        SELECT d.title AS doc_title, d._id as doc_id, SUM(
+        SELECT d.title AS doc_title, d.full_text AS doc_full_text, d._id as doc_id, SUM(
             LN(
                 (stats.total_docs - q.doc_freq + 0.5) / (q.doc_freq + 0.5) + 1
             ) * (tds.tf * (:k1 + 1)) / (
@@ -231,26 +235,40 @@ class PostgresIndex:
             for index in table.indexes:
                 index.create(connection, checkfirst=True)
 
-    async def retrieve_bm25(self, tokens: list[str], k1: float, b: float, top_k: int) -> list[Row]:
+
+    @staticmethod
+    def _doc_hash(db_id, doc_full_text: str):
+        payload = json.dumps(
+            [db_id, doc_full_text],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+    async def retrieve_bm25(self, tokens: list[str], k1: float, b: float, top_k: int) -> list[Document]:
         async with self.engine.connect() as conn:
             cur = await conn.execute(
                 self._bm25_sql,
                 {"tokens": tokens, "k1": k1, "b": b, "top_k": top_k},
             )
-            rows = [record for record in cur]
+            rows = [
+                Document(id=self._doc_hash(record[2], record[1]), title=record[0], text=record[1], score=record[3])
+                for record in cur
+            ]
         return rows
 
-    async def retrieve_vector(self, query_embedding: list[float], top_k: int) -> list[Row]:
+    async def retrieve_vector(self, query_embedding: list[float], top_k: int) -> list[Document]:
         """Return indexed documents with cosine distance, lowest first."""
         # Bind a standard Postgres array, then cast on the server. This works
         # whether or not the borrowed engine has custom pgvector codecs.
-        async with self.engine.connect() as connection:
-            vector_schema = await self._get_vector_schema(connection)
+        async with self.engine.connect() as conn:
+            vector_schema = await self._get_vector_schema(conn)
             query_vector = cast(
                 bindparam("query_embedding", type_=ARRAY(Float)),
                 _SchemaVector(self.EMBEDDING_DIMENSIONS, vector_schema),
             )
-            quote = connection.dialect.identifier_preparer.quote_identifier
+            quote = conn.dialect.identifier_preparer.quote_identifier
             distance = self._document.c.embedding.op(
                 f"OPERATOR({quote(vector_schema)}.<=>)", return_type=Float
             )(query_vector)
@@ -258,16 +276,20 @@ class PostgresIndex:
                 select(
                     self._document.c._id.label("doc_id"),
                     self._document.c.title.label("doc_title"),
+                    self._document.c.full_text.label("doc_full_text"),
                     distance.label("distance"),
                 )
                 .where(self._document.c.embedding.is_not(None))
                 .order_by(distance)
                 .limit(top_k)
             )
-            result = await connection.execute(
+            rows = await conn.execute(
                 statement, {"query_embedding": query_embedding}
             )
-            return list(result)
+            return [
+                Document(id=self._doc_hash(row.doc_id, row.doc_full_text), title=row.doc_title, text=row.doc_full_text, score=1 - row.distance)
+                for row in rows
+            ]
 
 
 __all__ = [

@@ -19,12 +19,11 @@ fine -- what matters is whether the *fused* nDCG@10 exceeds both singles.
 ----------------------------------------------------------------------------
 Design decisions (called out because they bit us before):
 
-* doc_id <-> url mapping.
-  The production retrievers return `doc_id` = the integer `document._id`, but
-  ranx needs the BEIR doc id, which we store in `document.url`. So we load a
-  one-time `_id -> url` map from the DB up front and translate every result's
-  doc_id to its url when building the ranx run. (Chosen over joining url into
-  every retrieval query so we don't have to fork the production SQL.)
+* Document.id -> benchmark ID mapping.
+  The production retrievers return hashed Document IDs, but ranx needs the
+  original BEIR document IDs stored in `document.url`. We build a one-time
+  mapping using the same identity function as PostgresIndex, then translate
+  results from all four retrieval modes before scoring them.
 
 * qwen3-embedding is ASYMMETRIC via INSTRUCTIONS, not prefixes. Documents were
   embedded raw (no prefix); queries must be wrapped as
@@ -323,12 +322,15 @@ async def count_null_embeddings(engine: AsyncEngine) -> int:
         ).scalar_one()
 
 
-async def load_id_to_url(engine: AsyncEngine) -> dict[int, str]:
-    """One-time `document._id -> document.url` map for translating retriever
-    doc_ids (integers) into the BEIR doc ids that ranx/qrels are keyed by."""
+async def load_id_to_url(engine: AsyncEngine) -> dict[str, str]:
+    """Map public Document IDs to the original BEIR IDs stored in document.url."""
     async with engine.connect() as conn:
-        cur = await conn.execute(text("SELECT _id, url FROM document"))
-        return {row._id: row.url for row in cur}
+        cur = await conn.execute(text("SELECT _id, full_text, url FROM document"))
+        return {
+            PostgresIndex._doc_hash(row._id, row.full_text): row.url
+            for row in cur
+            if row.url is not None
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -339,7 +341,7 @@ async def run_all_modes(
     embedding_model: BaseModelProvider,
     rerank_model: BaseModelProvider,
     dataset_name: str,
-    id_to_url: dict[int, str],
+    id_to_url: dict[str, str],
     k1: float,
     b: float,
     top_k: int,
@@ -402,11 +404,10 @@ async def run_all_modes(
     sem = asyncio.Semaphore(concurrency)
 
     def to_url_run(results) -> dict[str, float]:
-        """Map a retriever's results to {url: score}, dropping any doc_id we
-        can't resolve to a url (shouldn't happen if ingest matches the corpus)."""
+        """Map Document results to {benchmark_id: score}, omitting unmapped IDs."""
         run: dict[str, float] = {}
         for r in results:
-            url = id_to_url.get(r.doc_id)
+            url = id_to_url.get(r.id)
             if url is not None:
                 run[url] = float(r.score)
         return run
@@ -601,7 +602,7 @@ async def async_main(args: argparse.Namespace) -> None:
             )
 
         id_to_url = await load_id_to_url(engine)
-        LOG.info("loaded _id->url map for %d documents", len(id_to_url))
+        LOG.info("loaded Document.id->benchmark ID map for %d documents", len(id_to_url))
 
         LOG.info("running BM25 + vector + RRF + reranker over %s", args.dataset)
         settings = get_settings()

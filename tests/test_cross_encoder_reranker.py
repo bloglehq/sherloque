@@ -1,27 +1,19 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from sherloque.document import Document
 from sherloque.rank.cross_encoder_rerank import CrossEncoderReRanker
-from sherloque.retrieve import RetrieverResult
 
 
 class CrossEncoderReRankerTests(unittest.IsolatedAsyncioTestCase):
     async def test_maps_model_indexes_to_original_candidates(self) -> None:
         candidates = [
-            RetrieverResult(doc_id=10, doc_title="Ten", score=0.3),
-            RetrieverResult(doc_id=20, doc_title="Twenty", score=0.2),
-            RetrieverResult(doc_id=30, doc_title="Thirty", score=0.1),
+            Document(id="ten", title="Ten", text="text ten", score=0.3),
+            Document(id="twenty", title="Twenty", text="text twenty", score=0.2),
+            Document(id="thirty", title="Thirty", text="text thirty", score=0.1),
         ]
-        rows = [
-            SimpleNamespace(doc_id=30, doc_full_text="text thirty"),
-            SimpleNamespace(doc_id=10, doc_full_text="text ten"),
-            SimpleNamespace(doc_id=20, doc_full_text="text twenty"),
-        ]
-        connection = AsyncMock()
-        connection.execute.return_value = rows
+        original = [document.model_dump() for document in candidates]
         engine = MagicMock()
-        engine.connect.return_value.__aenter__.return_value = connection
         model = MagicMock()
         model.rerank = AsyncMock(
             return_value=[(2, 0.95), (0, 0.8), (1, 0.1)]
@@ -38,8 +30,13 @@ class CrossEncoderReRankerTests(unittest.IsolatedAsyncioTestCase):
             query="query",
             documents=["text ten", "text twenty", "text thirty"],
         )
-        self.assertEqual([result.doc_id for result in results], [30, 10])
+        self.assertEqual([result.id for result in results], ["thirty", "ten"])
+        self.assertEqual([result.title for result in results], ["Thirty", "Ten"])
+        self.assertEqual([result.text for result in results], ["text thirty", "text ten"])
         self.assertEqual([result.score for result in results], [0.95, 0.8])
+        self.assertEqual([document.model_dump() for document in candidates], original)
+        self.assertIsNot(results[0], candidates[2])
+        engine.connect.assert_not_called()
 
     async def test_empty_candidates_skip_database_and_model(self) -> None:
         engine = MagicMock()
