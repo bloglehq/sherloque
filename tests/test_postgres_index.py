@@ -131,9 +131,13 @@ class PostgresIndexIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         for index, title in ((self.index, "First index"), (other, "Second index")):
             lexical = await index.retrieve_bm25(["word"], 1.5, 0.75, 10)
+            tfidf = await index.retrieve_tfidf(["word"], 10)
             dense = await index.retrieve_vector(query_vector, 10)
             self.assertEqual([row.title for row in lexical], [title])
             self.assertAlmostEqual(lexical[0].score, math.log(4 / 3))
+            self.assertEqual([row.title for row in tfidf], [title])
+            self.assertAlmostEqual(tfidf[0].score, 1.0)
+            self.assertEqual(tfidf[0].id, lexical[0].id)
             self.assertEqual([row.title for row in dense], [title])
             self.assertAlmostEqual(dense[0].score, 1.0)
             self.assertIsInstance(lexical[0], Document)
@@ -145,9 +149,9 @@ class PostgresIndexIntegrationTests(unittest.IsolatedAsyncioTestCase):
             repeated_dense = await index.retrieve_vector(query_vector, 10)
             self.assertEqual(repeated_lexical[0].id, lexical[0].id)
             self.assertEqual(repeated_dense[0].id, dense[0].id)
-            fused = reciprocal_rank_fusion([lexical, dense])
+            fused = reciprocal_rank_fusion([lexical, tfidf, dense])
             self.assertEqual(len(fused), 1)
-            self.assertAlmostEqual(fused[0].score, 2 / 61)
+            self.assertAlmostEqual(fused[0].score, 3 / 61)
             self.assertEqual(await index.retrieve_bm25([], 1.5, 0.75, 10), [])
             self.assertEqual(await index.retrieve_vector(query_vector, 0), [])
 

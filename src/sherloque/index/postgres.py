@@ -83,6 +83,59 @@ class PostgresIndex:
         # @formatter:on
     )
 
+    TFIDF_SQL = """
+        WITH q_counts AS (
+            SELECT token, COUNT(*)::float AS tf
+            FROM unnest(CAST(:tokens AS text[])) AS query(token)
+            GROUP BY token
+        ), stats AS (
+            SELECT COUNT(*)::float AS total_docs FROM {document}
+        ), q_terms AS (
+            SELECT t._id AS token_id, q.tf,
+                   LN((stats.total_docs + 1) / (t.doc_freq + 1)) + 1 AS idf
+            FROM q_counts q
+            JOIN {token} t ON t.token = q.token
+            CROSS JOIN stats
+            WHERE t.doc_freq > 0
+        ), q_weights AS (
+            SELECT token_id, idf,
+                   (CASE WHEN :sublinear_tf THEN 1 + LN(tf) ELSE tf END) * idf AS weight
+            FROM q_terms
+        ), dot_products AS (
+            SELECT tds.doc_id,
+                   SUM((CASE WHEN :sublinear_tf THEN 1 + LN(tds.tf::float)
+                             ELSE tds.tf END) * q.idf * q.weight) AS dot_product
+            FROM {term_doc_stats} tds
+            JOIN q_weights q ON q.token_id = tds.token_id
+            WHERE tds.tf > 0
+            GROUP BY tds.doc_id
+        ), doc_norms AS (
+            -- Normalize over every term in each candidate, including non-query terms.
+            SELECT tds.doc_id,
+                   SQRT(SUM(POWER(
+                       (CASE WHEN :sublinear_tf THEN 1 + LN(tds.tf::float)
+                             ELSE tds.tf END)
+                       * (LN((stats.total_docs + 1) / (t.doc_freq + 1)) + 1), 2
+                   ))) AS norm
+            FROM {term_doc_stats} tds
+            JOIN dot_products matches ON matches.doc_id = tds.doc_id
+            JOIN {token} t ON t._id = tds.token_id
+            CROSS JOIN stats
+            WHERE tds.tf > 0
+            GROUP BY tds.doc_id
+        ), query_norm AS (
+            SELECT SQRT(SUM(POWER(weight, 2))) AS norm FROM q_weights
+        )
+        SELECT d.title AS doc_title, d.full_text AS doc_full_text, d._id AS doc_id,
+               (matches.dot_product / NULLIF(dn.norm * qn.norm, 0))::float AS score
+        FROM dot_products matches
+        JOIN doc_norms dn ON dn.doc_id = matches.doc_id
+        JOIN {document} d ON d._id = matches.doc_id
+        CROSS JOIN query_norm qn
+        ORDER BY score DESC, d._id
+        LIMIT :top_k
+    """
+
     def __init__(self, engine: AsyncEngine, schema: str):
         if not schema or "\x00" in schema or len(schema.encode("utf-8")) > 63:
             raise ValueError("schema must contain 1–63 UTF-8 bytes and no null bytes")
@@ -186,13 +239,13 @@ class PostgresIndex:
             postgresql_ops={"embedding": "vector_cosine_ops"},
         )
         format_table = self.engine.dialect.identifier_preparer.format_table
-        self._bm25_sql = text(
-            self.BM25_SQL.format(**{
-                # Escape colons for the text-bind parser after quoting identifiers.
-                table.name: format_table(table).replace(":", r"\:")
-                for table in (self._document, self._token, self._term_doc_stats)
-            })
-        )
+        # Escape colons for the text-bind parser after quoting identifiers.
+        table_names = {
+            table.name: format_table(table).replace(":", r"\:")
+            for table in (self._document, self._token, self._term_doc_stats)
+        }
+        self._bm25_sql = text(self.BM25_SQL.format(**table_names))
+        self._tfidf_sql = text(self.TFIDF_SQL.format(**table_names))
 
     async def initialize(self) -> None:
         """Create the schema, pgvector extension, tables, and indexes atomically.
@@ -257,6 +310,35 @@ class PostgresIndex:
                 for record in cur
             ]
         return rows
+
+    async def retrieve_tfidf(
+        self, tokens: list[str], top_k: int, sublinear_tf: bool = False
+    ) -> list[Document]:
+        """Return matching documents by TF-IDF cosine similarity, highest first.
+
+        IDF is ln((N + 1) / (df + 1)) + 1. Term frequency is the raw count,
+        or 1 + ln(tf) when sublinear_tf is enabled, for both documents and queries.
+        Query terms outside the index vocabulary are ignored.
+        """
+        if top_k < 0:
+            raise ValueError("top_k must be non-negative")
+        if top_k == 0 or not tokens:
+            return []
+
+        async with self.engine.connect() as conn:
+            rows = await conn.execute(
+                self._tfidf_sql,
+                {"tokens": tokens, "top_k": top_k, "sublinear_tf": sublinear_tf},
+            )
+            return [
+                Document(
+                    id=self._doc_hash(row.doc_id, row.doc_full_text),
+                    title=row.doc_title,
+                    text=row.doc_full_text,
+                    score=row.score,
+                )
+                for row in rows
+            ]
 
     async def retrieve_vector(self, query_embedding: list[float], top_k: int) -> list[Document]:
         """Return indexed documents with cosine distance, lowest first."""
